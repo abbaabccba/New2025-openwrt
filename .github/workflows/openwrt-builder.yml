@@ -27,6 +27,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  UPLOAD_COWTRANSFER: true
 
 jobs:
   build:
