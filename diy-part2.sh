@@ -31,3 +31,6 @@ git clone https://github.com/xiaorouji/openwrt-passwall package/passwall-luci
 #For Go
 rm -rf feeds/packages/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/lang/golang
+
+# 临时删除
+rm -f target/linux/ramips/patches-5.10/810-uvc-add-iPassion-iP2970-support.patch
