@@ -34,3 +34,15 @@ git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/l
 
 # 临时删除
 rm -f target/linux/ramips/patches-5.10/810-uvc-add-iPassion-iP2970-support.patch
+
+# =========================================================
+# Temporary fix for ramips/mt7621 Linux 5.10.268 GPIO patch conflict
+# =========================================================
+
+if grep -q '^CONFIG_TARGET_ramips_mt7621=y' .config; then
+    echo "MT7621 detected, removing obsolete Ralink GPIO patches..."
+
+    rm -f target/linux/ramips/patches-5.10/802-GPIO-MIPS-ralink-add-gpio-driver-for-ralink-SoC.patch
+
+    rm -f target/linux/ramips/patches-5.10/803-gpio-ralink-Add-support-for-GPIO-as-interrupt-contro.patch
+fi
