@@ -1,0 +1,492 @@
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+#
+# File: .github/workflows/openwrt-builder.yml
+# Description: Build OpenWrt using GitHub Actions
+#
+# Based on P3TERX/Actions-OpenWrt
+#
+
+name: OpenWrt Builder NeWiFi
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+# Release / workflow cleanup 所需权限
+permissions:
+  contents: write
+  actions: write
+
+env:
+  # ============================================================
+  # LEDE source
+  # ============================================================
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+
+  # 固定源码版本
+  # 该 commit 对应 Linux 5.10.265
+  # 5.10.268 出问题期间暂时使用
+  REPO_COMMIT: 7ecd0545288eb0a196b9c3dca71f075943baa014
+
+  # ============================================================
+  # Build configuration
+  # ============================================================
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+
+  # ============================================================
+  # Upload
+  # ============================================================
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+
+  # 当前 workflow 没有 CowTransfer 上传步骤
+  # 保留变量，不影响编译
+  UPLOAD_COWTRANSFER: true
+
+  TZ: Asia/Shanghai
+
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-22.04
+
+    steps:
+
+    # ============================================================
+    # Checkout current repository
+    # ============================================================
+    - name: Checkout
+      uses: actions/checkout@v4
+
+
+    # ============================================================
+    # Free disk space
+    # ============================================================
+    - name: 释放磁盘空间
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+
+
+    # ============================================================
+    # Initialize build environment
+    # ============================================================
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf \
+          /etc/apt/sources.list.d/* \
+          /usr/share/dotnet \
+          /usr/local/lib/android \
+          /opt/ghc \
+          /opt/hostedtoolcache/CodeQL
+
+        sudo docker image prune --all --force
+
+        sudo -E apt-get -qq update
+
+        sudo -E apt-get -qq install \
+          ack \
+          antlr3 \
+          asciidoc \
+          autoconf \
+          automake \
+          autopoint \
+          binutils \
+          bison \
+          build-essential \
+          bzip2 \
+          ccache \
+          cmake \
+          cpio \
+          curl \
+          device-tree-compiler \
+          fastjar \
+          flex \
+          gawk \
+          gettext \
+          gcc-multilib \
+          g++-multilib \
+          git \
+          gperf \
+          haveged \
+          help2man \
+          intltool \
+          libc6-dev-i386 \
+          libelf-dev \
+          libfuse-dev \
+          libglib2.0-dev \
+          libgmp3-dev \
+          libltdl-dev \
+          libmpc-dev \
+          libmpfr-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libpython3-dev \
+          libreadline-dev \
+          libssl-dev \
+          libtool \
+          lrzsz \
+          mkisofs \
+          msmtp \
+          ninja-build \
+          p7zip \
+          p7zip-full \
+          patch \
+          pkgconf \
+          python2.7 \
+          python3 \
+          python3-pyelftools \
+          python3-setuptools \
+          qemu-utils \
+          rsync \
+          scons \
+          squashfs-tools \
+          subversion \
+          swig \
+          texinfo \
+          uglifyjs \
+          upx-ucl \
+          unzip \
+          vim \
+          wget \
+          xmlto \
+          xxd \
+          zlib1g-dev
+
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+
+        sudo timedatectl set-timezone "$TZ"
+
+        sudo mkdir -p /workdir
+        sudo chown "$USER":"$(id -gn)" /workdir
+
+
+    # ============================================================
+    # Clone LEDE and pin source commit
+    # ============================================================
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        set -e
+
+        echo "========================================"
+        echo "Disk usage"
+        echo "========================================"
+        df -hT "$PWD"
+
+        echo
+        echo "========================================"
+        echo "Clone LEDE"
+        echo "========================================"
+
+        git clone \
+          -b "$REPO_BRANCH" \
+          "$REPO_URL" \
+          openwrt
+
+        cd openwrt
+
+        echo
+        echo "========================================"
+        echo "Checkout pinned commit"
+        echo "========================================"
+        echo "REPO_COMMIT=$REPO_COMMIT"
+
+        git checkout --detach "$REPO_COMMIT"
+
+        echo
+        echo "========================================"
+        echo "Current source version"
+        echo "========================================"
+
+        git log -1 \
+          --pretty=format:'Commit: %H%nDate: %cd%nSubject: %s' \
+          --date=iso
+
+        echo
+        echo
+
+        echo "========================================"
+        echo "Kernel 5.10 version"
+        echo "========================================"
+
+        cat include/kernel-5.10
+
+        echo
+        echo "========================================"
+        echo "Verify pinned commit"
+        echo "========================================"
+
+        ACTUAL_COMMIT="$(git rev-parse HEAD)"
+
+        if [ "$ACTUAL_COMMIT" != "$REPO_COMMIT" ]; then
+          echo "ERROR: Commit verification failed!"
+          echo "Expected: $REPO_COMMIT"
+          echo "Actual:   $ACTUAL_COMMIT"
+          exit 1
+        fi
+
+        echo "Commit verification OK."
+
+        echo
+        echo "========================================"
+        echo "Verify kernel version"
+        echo "========================================"
+
+        if ! grep -Fq 'LINUX_VERSION-5.10 = .265' include/kernel-5.10; then
+          echo "ERROR: Expected Linux 5.10.265!"
+          cat include/kernel-5.10
+          exit 1
+        fi
+
+        echo "Kernel verification OK: Linux 5.10.265"
+
+        ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
+
+
+    # ============================================================
+    # Custom feeds
+    # ============================================================
+    - name: Load custom feeds
+      run: |
+        set -e
+
+        [ -e "$FEEDS_CONF" ] && \
+          mv "$FEEDS_CONF" openwrt/feeds.conf.default
+
+        chmod +x "$DIY_P1_SH"
+
+        cd openwrt
+
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
+
+    # ============================================================
+    # Update feeds
+    # ============================================================
+    - name: Update feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+
+
+    # ============================================================
+    # Install feeds
+    # ============================================================
+    - name: Install feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds install -a
+
+
+    # ============================================================
+    # Load config
+    # ============================================================
+    - name: Load custom configuration
+      run: |
+        set -e
+
+        [ -e files ] && \
+          mv files openwrt/files
+
+        [ -e "$CONFIG_FILE" ] && \
+          mv "$CONFIG_FILE" openwrt/.config
+
+        chmod +x "$DIY_P2_SH"
+
+        cd openwrt
+
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
+
+    # ============================================================
+    # Download packages
+    # ============================================================
+    - name: Download package
+      id: package
+      run: |
+        cd openwrt
+
+        make defconfig
+
+        echo "========================================"
+        echo "Target"
+        echo "========================================"
+
+        grep '^CONFIG_TARGET_' .config | head -30 || true
+
+        echo
+        echo "========================================"
+        echo "Downloading packages"
+        echo "========================================"
+
+        make download -j8
+
+        echo
+        echo "========================================"
+        echo "Remove incomplete downloads"
+        echo "========================================"
+
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+
+    # ============================================================
+    # Compile firmware
+    # ============================================================
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd openwrt
+
+        echo "========================================"
+        echo "$(nproc) thread compile"
+        echo "========================================"
+
+        make -j"$(nproc)" || \
+        make -j1 || \
+        make -j1 V=s
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config \
+          | sed -r 's/.*DEVICE_(.*)=y/\1/' \
+          > DEVICE_NAME
+
+        if [ -s DEVICE_NAME ]; then
+          echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> "$GITHUB_ENV"
+        fi
+
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> "$GITHUB_ENV"
+
+
+    # ============================================================
+    # Disk status
+    # ============================================================
+    - name: Check space usage
+      if: ${{ !cancelled() }}
+      run: |
+        df -hT
+
+
+    # ============================================================
+    # Upload whole bin directory
+    # ============================================================
+    - name: Upload bin directory
+      uses: actions/upload-artifact@v4
+      if: ${{ steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true' }}
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+        retention-days: 5
+
+
+    # ============================================================
+    # Organize firmware
+    # ============================================================
+    - name: Organize files
+      id: organize
+      if: ${{ env.UPLOAD_FIRMWARE == 'true' && !cancelled() }}
+      run: |
+        set -e
+
+        cd openwrt/bin/targets/*/*
+
+        rm -rf packages
+
+        echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+        echo "========================================"
+        echo "Firmware files"
+        echo "========================================"
+
+        ls -lh
+
+
+    # ============================================================
+    # Upload firmware artifact
+    # ============================================================
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@v4
+      if: ${{ steps.organize.outputs.status == 'success' && !cancelled() }}
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+        retention-days: 5
+
+
+    # ============================================================
+    # Generate release tag
+    # ============================================================
+    - name: Generate release tag
+      id: tag
+      if: ${{ env.UPLOAD_RELEASE == 'true' && !cancelled() }}
+      run: |
+        RELEASE_TAG="$(date +"%Y.%m.%d-%H%M")"
+
+        echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## OpenWrt Firmware"
+          echo
+          echo "- Build date: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "- LEDE branch: $REPO_BRANCH"
+          echo "- LEDE commit: $REPO_COMMIT"
+          echo "- Kernel: Linux 5.10.265"
+        } > release.txt
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+
+    # ============================================================
+    # Upload GitHub Release
+    # ============================================================
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v2
+      if: ${{ steps.tag.outputs.status == 'success' && !cancelled() }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+
+
+    # ============================================================
+    # Cleanup workflow runs
+    # ============================================================
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 2
+
+
+    # ============================================================
+    # Cleanup old Releases
+    # ============================================================
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@master
+      if: ${{ env.UPLOAD_RELEASE == 'true' && !cancelled() }}
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
