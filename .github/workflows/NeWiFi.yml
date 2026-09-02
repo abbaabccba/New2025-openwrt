@@ -7,7 +7,7 @@
 # Based on P3TERX/Actions-OpenWrt
 #
 
-name: OpenWrt Builder
+name: NeWiFi
 
 on:
   repository_dispatch:
