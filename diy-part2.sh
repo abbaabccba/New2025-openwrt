@@ -35,3 +35,19 @@ git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/packages/l
 # 临时删除
 rm -f target/linux/ramips/patches-5.10/810-uvc-add-iPassion-iP2970-support.patch
 
+
+# Custom Xray 1.5.8
+if [ -f "files/usr/bin/xray" ]; then
+    echo "========================================"
+    echo "Custom Xray binary detected"
+    echo "========================================"
+
+    chmod 0755 files/usr/bin/xray
+
+    ls -lh files/usr/bin/xray
+    file files/usr/bin/xray
+    sha256sum files/usr/bin/xray
+else
+    echo "ERROR: files/usr/bin/xray not found!"
+    exit 1
+fi
