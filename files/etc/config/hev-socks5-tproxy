@@ -1,0 +1,4 @@
+# lan-socks runs the binary itself. Do not enable this second service.
+config hev-socks5-tproxy 'config'
+        option enabled '0'
+        option conffile '/etc/hev-socks5-tproxy/main.yml'

@@ -1,0 +1,66 @@
+#!/bin/sh
+# Dedicated table. Never flush the system ruleset.
+set -eu
+cleanup() {
+    nft delete table inet lan_socks 2>/dev/null || true
+    while ip -4 rule del priority 10010 fwmark 0x100/0x100 table 10010 2>/dev/null; do :; done
+    ip -4 route flush table 10010 2>/dev/null || true
+}
+[ "${1:-apply}" != remove ] || { cleanup; exit 0; }
+[ "$(uci -q get lan-socks.main.enabled || true)" = 1 ] || { cleanup; exit 0; }
+UDP=$(uci -q get lan-socks.main.udp || true)
+f=$(mktemp /tmp/lan-socks.XXXXXX)
+trap 'rm -f "$f"' EXIT HUP INT TERM
+if nft list table inet lan_socks >/dev/null 2>&1; then
+    echo 'delete table inet lan_socks' >> "$f"
+fi
+cat >> "$f" <<'NFT'
+table inet lan_socks {
+    set bypass4 {
+        type ipv4_addr
+        flags interval
+        auto-merge
+        elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10,
+            127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12,
+            192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16,
+            198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24,
+            224.0.0.0/4, 240.0.0.0/4 }
+    }
+    chain prerouting {
+        type filter hook prerouting priority -151; policy accept;
+        iifname != "br-lan" return
+        meta nfproto != ipv4 return
+        fib daddr type local return
+        ip daddr @bypass4 return
+        meta mark & 0x200 != 0 return
+        meta l4proto tcp counter tproxy ip to 127.0.0.1:1088 meta mark set meta mark | 0x100 accept
+NFT
+if [ "$UDP" = 1 ]; then
+    echo '        meta l4proto udp counter tproxy ip to 127.0.0.1:1088 meta mark set meta mark | 0x100 accept' >> "$f"
+fi
+cat >> "$f" <<'NFT'
+    }
+    chain forward_guard {
+        type filter hook forward priority -1; policy accept;
+        iifname != "br-lan" return
+        # IPv4-only proxy: prevent routed IPv6 from bypassing it.
+        meta nfproto ipv6 counter reject with icmpv6 type admin-prohibited
+        ip daddr @bypass4 return
+NFT
+if [ "$UDP" != 1 ]; then
+    cat >> "$f" <<'NFT'
+        # Explicit direct exceptions for DNS/NTP; all other public UDP is rejected.
+        udp dport { 53, 123 } return
+        meta l4proto udp counter reject with icmp type port-unreachable
+NFT
+fi
+cat >> "$f" <<'NFT'
+    }
+}
+NFT
+nft -c -f "$f"
+ip -4 route replace local default dev lo table 10010
+if ! ip -4 rule show | grep -q '^10010:.*fwmark 0x100/0x100 lookup 10010'; then
+    ip -4 rule add priority 10010 fwmark 0x100/0x100 table 10010
+fi
+nft -f "$f"

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Keep network addresses and DNS learned from WAN unchanged.
+uci -q batch <<'UCI'
+set firewall.@defaults[0].flow_offloading='0'
+set firewall.@defaults[0].flow_offloading_hw='0'
+set firewall.lan_socks=include
+set firewall.lan_socks.type='script'
+set firewall.lan_socks.path='/usr/libexec/lan-socks-rules'
+set firewall.lan_socks.fw4_compatible='1'
+commit firewall
+UCI
+/etc/init.d/hev-socks5-tproxy disable
+/etc/init.d/lan-socks enable
+exit 0

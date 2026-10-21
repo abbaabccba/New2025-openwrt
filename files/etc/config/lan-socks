@@ -1,0 +1,5 @@
+config lan-socks 'main'
+        # Enable after checking WAN route to the SOCKS server.
+        option enabled '0'
+        # Set 1 only if the upstream supports working SOCKS5 UDP ASSOCIATE.
+        option udp '0'

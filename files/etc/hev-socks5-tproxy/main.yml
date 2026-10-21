@@ -1,0 +1,23 @@
+main:
+  workers: 1
+socks5:
+  address: SOCKS_SERVER_ADDRESS
+  port: 1080
+  udp: 'udp'
+  mark: 512
+  # If authentication is required, add username and password here on the router.
+tcp:
+  address: '0.0.0.0'
+  port: 1088
+udp:
+  address: '0.0.0.0'
+  port: 1088
+misc:
+  task-stack-size: 20480
+  udp-recv-buffer-size: 65536
+  udp-copy-buffer-nums: 4
+  connect-timeout: 10000
+  tcp-read-write-timeout: 300000
+  udp-read-write-timeout: 60000
+  log-level: warn
+  limit-nofile: 4096
